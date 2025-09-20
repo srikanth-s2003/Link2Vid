@@ -1,0 +1,12 @@
+{
+  "functions": {
+    "pages/api/download.js": {
+      "maxDuration": 300
+    }
+  },
+  "build": {
+    "env": {
+      "ENABLE_EXPERIMENTAL_COREPACK": "1"
+    }
+  }
+}
