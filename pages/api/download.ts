@@ -394,13 +394,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           else if (hostname.includes('twitch')) platform = 'Twitch'
         } catch {}
         
-        await saveDownload(
-          (session.user as any).id,
-          url,
-          sanitizedFilename.replace(/^video_\d+_/, '').replace(/\.[^.]+$/, ''), // Clean title
-          platform,
-          `${fileSizeMB.toFixed(1)}MB`
-        )
+        await saveDownload({
+          userId: (session.user as any).id,
+          url: url,
+          title: sanitizedFilename.replace(/^video_\d+_/, '').replace(/\.[^.]+$/, ''), // Clean title
+          filename: sanitizedFilename,
+          platform: platform,
+          fileSize: `${fileSizeMB.toFixed(1)}MB`
+        })
         console.log('Download saved to user history')
       }
     } catch (dbError) {

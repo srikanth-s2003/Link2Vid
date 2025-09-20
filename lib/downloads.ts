@@ -5,6 +5,8 @@ export interface Download {
   url: string
   title: string
   filename: string
+  platform: string
+  fileSize: string
   createdAt: Date
 }
 
