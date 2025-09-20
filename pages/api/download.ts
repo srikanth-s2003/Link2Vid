@@ -186,8 +186,14 @@ function createCleanupFunction(outputPath: string): () => void {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Only allow POST requests
+  // Debug logging
+  console.log('API Request Method:', req.method)
+  console.log('API Request Headers:', req.headers)
+  console.log('API Request Body:', req.body)
+  
+  // Only allow POST requests - Updated for production fix
   if (req.method !== 'POST') {
+    console.log('Method not allowed:', req.method)
     return res.status(405).json({ error: 'Method not allowed' })
   }
   
