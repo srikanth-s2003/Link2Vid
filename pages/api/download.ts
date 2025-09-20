@@ -8,6 +8,39 @@ import path from 'path'
 import NodeCache from 'node-cache'
 import crypto from 'crypto'
 
+// Check if we're in Vercel production environment
+const isVercelProduction = process.env.VERCEL === '1'
+const isLocal = process.env.NODE_ENV === 'development'
+
+console.log('Environment check:', { isVercelProduction, isLocal, NODE_ENV: process.env.NODE_ENV, VERCEL: process.env.VERCEL })
+
+// Alternative download method for Vercel production
+async function downloadVideoProduction(url: string, outputTemplate: string) {
+  console.log('Using production download method for Vercel')
+  
+  // For now, return an error with instructions
+  throw new Error('Video downloading is not yet available in production. The server needs additional configuration for video processing. Please try again later or contact support.')
+}
+
+// Local development download method
+async function downloadVideoLocal(url: string, outputTemplate: string) {
+  console.log('Using local development download method')
+  
+  const result = await youtubedl(url, {
+    output: outputTemplate,
+    format: 'best[height<=720]/best',
+    noPlaylist: true,
+    writeInfoJson: false,
+    writeThumbnail: false,
+    retries: 1,
+    ignoreErrors: false,
+    preferFreeFormats: true,
+    addHeader: ['User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'],
+  })
+  
+  return result
+}
+
 // Production-ready configuration
 const config = {
   // Rate limiting: requests per IP per time window
@@ -272,37 +305,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const outputTemplate = path.join(tempDir, `video_${timestamp}_%(title)s.%(ext)s`)
     
     // Download with comprehensive options and retry
-    console.log('Starting youtube-dl-exec for URL:', url)
+    console.log('Starting video download for URL:', url)
+    console.log('Environment:', { isVercelProduction, isLocal })
+    
     const output = await retryOperation(async () => {
       try {
-        console.log('Attempting youtube-dl-exec with outputTemplate:', outputTemplate)
-        const result = await youtubedl(url, {
-          output: outputTemplate,
-          // More flexible format selection with fallbacks
-          format: 'best[height<=720]/best',
-          noPlaylist: true,
-          writeInfoJson: false,
-          writeThumbnail: false,
-          retries: 1, // Let our retry mechanism handle retries
-          ignoreErrors: false,
-          // Additional security and performance options
-          preferFreeFormats: true,
-          addHeader: ['User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'],
-        })
-        console.log('youtube-dl-exec successful, result:', result)
+        console.log('Attempting download with outputTemplate:', outputTemplate)
+        
+        let result;
+        if (isVercelProduction) {
+          result = await downloadVideoProduction(url, outputTemplate)
+        } else {
+          result = await downloadVideoLocal(url, outputTemplate)
+        }
+        
+        console.log('Download successful, result:', result)
         return result
       } catch (error: any) {
-        console.error('youtube-dl-exec error:', {
+        console.error('Download error:', {
           message: error.message,
           stderr: error.stderr,
           stdout: error.stdout,
           stack: error.stack
         })
         
-        // Handle specific format errors for Instagram
-        if (error.message && error.message.includes('Requested format is not available')) {
+        // Handle specific format errors for Instagram (only in local)
+        if (!isVercelProduction && error.message && error.message.includes('Requested format is not available')) {
           console.log('Retrying with basic format selector')
-          // Try with a more basic format selector
           const result = await youtubedl(url, {
             output: outputTemplate,
             format: 'best',

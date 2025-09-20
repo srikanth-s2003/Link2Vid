@@ -176,7 +176,16 @@ export default function Home() {
 
       if (!response.ok) {
         const errorData = await response.text()
-        throw new Error(errorData || `HTTP error! status: ${response.status}`)
+        let errorMessage = errorData
+        
+        try {
+          const parsedError = JSON.parse(errorData)
+          errorMessage = parsedError.error || errorData
+        } catch {
+          // If not JSON, use as is
+        }
+        
+        throw new Error(errorMessage || `HTTP error! status: ${response.status}`)
       }
 
       const blob = await response.blob()
