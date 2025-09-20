@@ -272,9 +272,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const outputTemplate = path.join(tempDir, `video_${timestamp}_%(title)s.%(ext)s`)
     
     // Download with comprehensive options and retry
+    console.log('Starting youtube-dl-exec for URL:', url)
     const output = await retryOperation(async () => {
       try {
-        return await youtubedl(url, {
+        console.log('Attempting youtube-dl-exec with outputTemplate:', outputTemplate)
+        const result = await youtubedl(url, {
           output: outputTemplate,
           // More flexible format selection with fallbacks
           format: 'best[height<=720]/best',
@@ -287,11 +289,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           preferFreeFormats: true,
           addHeader: ['User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'],
         })
+        console.log('youtube-dl-exec successful, result:', result)
+        return result
       } catch (error: any) {
+        console.error('youtube-dl-exec error:', {
+          message: error.message,
+          stderr: error.stderr,
+          stdout: error.stdout,
+          stack: error.stack
+        })
+        
         // Handle specific format errors for Instagram
         if (error.message && error.message.includes('Requested format is not available')) {
+          console.log('Retrying with basic format selector')
           // Try with a more basic format selector
-          return await youtubedl(url, {
+          const result = await youtubedl(url, {
             output: outputTemplate,
             format: 'best',
             noPlaylist: true,
@@ -302,6 +314,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             preferFreeFormats: true,
             addHeader: ['User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'],
           })
+          console.log('Retry successful, result:', result)
+          return result
         }
         throw error
       }

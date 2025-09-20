@@ -1,6 +1,6 @@
 {
   "functions": {
-    "pages/api/download.js": {
+    "pages/api/download.ts": {
       "maxDuration": 300
     }
   },
