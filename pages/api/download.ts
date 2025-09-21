@@ -24,113 +24,68 @@ if (isVercelProduction) {
 async function downloadVideoProduction(url: string, outputTemplate: string) {
   console.log('Using production download method for Vercel')
   
-  // Import required modules
-  const { spawn } = require('child_process')
-  const https = require('https')
-  const fs = require('fs')
-  
-  const binaryPath = '/tmp/yt-dlp'
-  
   try {
-    // Ensure binary exists and is executable
-    if (!existsSync(binaryPath)) {
-      console.log('Downloading yt-dlp binary...')
-      
-      await new Promise<void>((resolve, reject) => {
-        const file = fs.createWriteStream(binaryPath)
-        
-        https.get('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp', (response: any) => {
-          if (response.statusCode !== 200) {
-            reject(new Error(`Failed to download yt-dlp: ${response.statusCode}`))
-            return
-          }
-          
-          response.pipe(file)
-          
-          file.on('finish', () => {
-            file.close(() => {
-              try {
-                fs.chmodSync(binaryPath, 0o755)
-                console.log('yt-dlp binary downloaded and made executable')
-                resolve()
-              } catch (error) {
-                console.error('Error making binary executable:', error)
-                reject(error)
-              }
-            })
-          })
-          
-          file.on('error', (error: any) => {
-            fs.unlink(binaryPath, () => {}) // Delete file on error
-            reject(error)
-          })
-        }).on('error', (error: any) => {
-          reject(error)
-        })
-      })
-    } else {
-      console.log('yt-dlp binary already exists')
-    }
+    // First, try using youtube-dl-exec directly 
+    // The package should handle binary installation automatically
+    console.log('Attempting direct youtube-dl-exec call...')
     
-    // Execute yt-dlp using spawn
-    console.log('Executing yt-dlp with spawn...')
-    const result = await new Promise<any>((resolve, reject) => {
-      const args = [
-        '--output', outputTemplate,
-        '--format', 'best[height<=720]/best',
-        '--no-playlist',
-        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        url
-      ]
-      
-      console.log('yt-dlp command:', binaryPath, args.join(' '))
-      
-      const child = spawn(binaryPath, args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        cwd: '/tmp'
-      })
-      
-      let stdout = ''
-      let stderr = ''
-      
-      child.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString()
-        console.log('yt-dlp stdout:', data.toString())
-      })
-      
-      child.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString()
-        console.log('yt-dlp stderr:', data.toString())
-      })
-      
-      child.on('close', (code: number) => {
-        console.log(`yt-dlp exited with code ${code}`)
-        
-        if (code === 0) {
-          resolve({ stdout, stderr })
-        } else {
-          reject(new Error(`yt-dlp failed with exit code ${code}: ${stderr}`))
-        }
-      })
-      
-      child.on('error', (error: Error) => {
-        console.error('yt-dlp spawn error:', error)
-        reject(error)
-      })
-      
-      // Set timeout
-      setTimeout(() => {
-        child.kill('SIGTERM')
-        reject(new Error('yt-dlp process timeout'))
-      }, 60000) // 60 second timeout
+    const result = await youtubedl(url, {
+      output: outputTemplate,
+      format: 'best[height<=720]/best',
+      noPlaylist: true,
+      writeInfoJson: false,
+      writeThumbnail: false,
+      // Add additional options for Vercel
+      noWarnings: true,
     })
     
-    console.log('yt-dlp completed successfully')
+    console.log('Direct youtube-dl-exec successful!')
     return result
     
-  } catch (error: any) {
-    console.error('Production download error:', error.message)
-    throw error
+  } catch (directError: any) {
+    console.error('Direct youtube-dl-exec failed:', directError.message)
+    console.error('Error details:', directError)
+    
+    // If that fails, it means we need to handle the binary manually
+    console.log('Attempting manual binary installation...')
+    
+    const { exec } = require('child_process')
+    const { promisify } = require('util')
+    const execAsync = promisify(exec)
+    
+    const binaryUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp'
+    const binaryPath = '/tmp/yt-dlp'
+    
+    try {
+      // Download binary using curl (available on Vercel)
+      console.log('Downloading yt-dlp binary with curl...')
+      await execAsync(`curl -L -o ${binaryPath} ${binaryUrl}`)
+      
+      // Make it executable
+      await execAsync(`chmod +x ${binaryPath}`)
+      
+      // Verify it works
+      const versionCheck = await execAsync(`${binaryPath} --version`)
+      console.log('yt-dlp version:', versionCheck.stdout.trim())
+      
+      // Execute the download
+      const command = `${binaryPath} --output "${outputTemplate}" --format "best[height<=720]/best" --no-playlist "${url}"`
+      console.log('Executing command:', command)
+      
+      const { stdout, stderr } = await execAsync(command, { 
+        timeout: 60000,  // 60 second timeout
+        maxBuffer: 1024 * 1024 * 10  // 10MB buffer
+      })
+      
+      console.log('Manual execution successful!')
+      return { stdout, stderr }
+      
+    } catch (manualError: any) {
+      console.error('Manual binary approach failed:', manualError.message)
+      
+      // Last resort - throw a helpful error
+      throw new Error(`Production download failed. Direct error: ${directError.message}. Manual error: ${manualError.message}`)
+    }
   }
 }
 
