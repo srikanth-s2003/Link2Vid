@@ -14,80 +14,123 @@ const isLocal = process.env.NODE_ENV === 'development'
 
 console.log('Environment check:', { isVercelProduction, isLocal, NODE_ENV: process.env.NODE_ENV, VERCEL: process.env.VERCEL })
 
+// Configure youtube-dl-exec for production
+if (isVercelProduction) {
+  // Set the binary path for production
+  process.env.YOUTUBE_DL_EXEC_PATH = '/opt/render/project/src/bin/yt-dlp'
+}
+
 // Alternative download method for Vercel production
 async function downloadVideoProduction(url: string, outputTemplate: string) {
   console.log('Using production download method for Vercel')
   
-  const { exec } = require('child_process')
-  const { promisify } = require('util')
-  const execAsync = promisify(exec)
+  // Import required modules
+  const { spawn } = require('child_process')
   const https = require('https')
   const fs = require('fs')
   
   const binaryPath = '/tmp/yt-dlp'
   
   try {
-    // Check if yt-dlp binary exists, if not download it
+    // Ensure binary exists and is executable
     if (!existsSync(binaryPath)) {
-      console.log('yt-dlp binary not found, downloading...')
+      console.log('Downloading yt-dlp binary...')
       
-      await new Promise((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         const file = fs.createWriteStream(binaryPath)
+        
         https.get('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp', (response: any) => {
-          response.pipe(file)
-          file.on('finish', () => {
-            file.close()
-            try {
-              fs.chmodSync(binaryPath, '755')
-              console.log('yt-dlp binary downloaded and made executable')
-              resolve(true)
-            } catch (chmodError) {
-              console.error('Error making yt-dlp executable:', chmodError)
-              reject(chmodError)
-            }
-          })
-        }).on('error', (err: any) => {
-          console.error('Error downloading yt-dlp binary:', err)
-          if (existsSync(binaryPath)) {
-            fs.unlinkSync(binaryPath)
+          if (response.statusCode !== 200) {
+            reject(new Error(`Failed to download yt-dlp: ${response.statusCode}`))
+            return
           }
-          reject(err)
+          
+          response.pipe(file)
+          
+          file.on('finish', () => {
+            file.close(() => {
+              try {
+                fs.chmodSync(binaryPath, 0o755)
+                console.log('yt-dlp binary downloaded and made executable')
+                resolve()
+              } catch (error) {
+                console.error('Error making binary executable:', error)
+                reject(error)
+              }
+            })
+          })
+          
+          file.on('error', (error: any) => {
+            fs.unlink(binaryPath, () => {}) // Delete file on error
+            reject(error)
+          })
+        }).on('error', (error: any) => {
+          reject(error)
         })
       })
+    } else {
+      console.log('yt-dlp binary already exists')
     }
     
-    // Execute yt-dlp binary directly
-    console.log('Executing yt-dlp binary...')
-    const command = `${binaryPath} --output "${outputTemplate}" --format "best[height<=720]/best" --no-playlist "${url}"`
-    console.log('Command:', command)
+    // Execute yt-dlp using spawn
+    console.log('Executing yt-dlp with spawn...')
+    const result = await new Promise<any>((resolve, reject) => {
+      const args = [
+        '--output', outputTemplate,
+        '--format', 'best[height<=720]/best',
+        '--no-playlist',
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        url
+      ]
+      
+      console.log('yt-dlp command:', binaryPath, args.join(' '))
+      
+      const child = spawn(binaryPath, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: '/tmp'
+      })
+      
+      let stdout = ''
+      let stderr = ''
+      
+      child.stdout?.on('data', (data: Buffer) => {
+        stdout += data.toString()
+        console.log('yt-dlp stdout:', data.toString())
+      })
+      
+      child.stderr?.on('data', (data: Buffer) => {
+        stderr += data.toString()
+        console.log('yt-dlp stderr:', data.toString())
+      })
+      
+      child.on('close', (code: number) => {
+        console.log(`yt-dlp exited with code ${code}`)
+        
+        if (code === 0) {
+          resolve({ stdout, stderr })
+        } else {
+          reject(new Error(`yt-dlp failed with exit code ${code}: ${stderr}`))
+        }
+      })
+      
+      child.on('error', (error: Error) => {
+        console.error('yt-dlp spawn error:', error)
+        reject(error)
+      })
+      
+      // Set timeout
+      setTimeout(() => {
+        child.kill('SIGTERM')
+        reject(new Error('yt-dlp process timeout'))
+      }, 60000) // 60 second timeout
+    })
     
-    const { stdout, stderr } = await execAsync(command)
-    
-    console.log('yt-dlp stdout:', stdout)
-    if (stderr) console.log('yt-dlp stderr:', stderr)
-    
-    return { stdout, stderr }
+    console.log('yt-dlp completed successfully')
+    return result
     
   } catch (error: any) {
     console.error('Production download error:', error.message)
-    console.error('Full error:', error)
-    
-    // Try fallback with youtube-dl-exec if binary approach fails
-    try {
-      console.log('Trying fallback with youtube-dl-exec...')
-      const result = await youtubedl(url, {
-        output: outputTemplate,
-        format: 'best[height<=720]/best',
-        noPlaylist: true,
-        writeInfoJson: false,
-        writeThumbnail: false
-      })
-      console.log('Fallback successful')
-      return result
-    } catch (fallbackError: any) {
-      console.error('Fallback also failed:', fallbackError.message)
-      throw new Error(`Video download failed: ${error.message}. Fallback error: ${fallbackError.message}`)
-    }
+    throw error
   }
 }
 
