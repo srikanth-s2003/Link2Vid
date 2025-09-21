@@ -181,11 +181,19 @@ export default function Home() {
         try {
           const parsedError = JSON.parse(errorData)
           errorMessage = parsedError.error || errorData
+          
+          // Show more helpful messages for production issues
+          if (errorMessage.includes('Download failed')) {
+            errorMessage = 'Video download is temporarily unavailable. Our system is being updated to support more platforms. Please try again later.'
+          } else if (errorMessage.includes('Method not allowed')) {
+            errorMessage = 'Service temporarily unavailable. Please refresh the page and try again.'
+          }
         } catch {
           // If not JSON, use as is
+          errorMessage = 'Download service temporarily unavailable. Please try again later.'
         }
         
-        throw new Error(errorMessage || `HTTP error! status: ${response.status}`)
+        throw new Error(errorMessage || `Service error (${response.status})`)
       }
 
       const blob = await response.blob()

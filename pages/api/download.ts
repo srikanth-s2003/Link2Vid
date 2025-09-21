@@ -18,8 +18,77 @@ console.log('Environment check:', { isVercelProduction, isLocal, NODE_ENV: proce
 async function downloadVideoProduction(url: string, outputTemplate: string) {
   console.log('Using production download method for Vercel')
   
-  // For now, return an error with instructions
-  throw new Error('Video downloading is not yet available in production. The server needs additional configuration for video processing. Please try again later or contact support.')
+  const { exec } = require('child_process')
+  const { promisify } = require('util')
+  const execAsync = promisify(exec)
+  const https = require('https')
+  const fs = require('fs')
+  
+  const binaryPath = '/tmp/yt-dlp'
+  
+  try {
+    // Check if yt-dlp binary exists, if not download it
+    if (!existsSync(binaryPath)) {
+      console.log('yt-dlp binary not found, downloading...')
+      
+      await new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(binaryPath)
+        https.get('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp', (response: any) => {
+          response.pipe(file)
+          file.on('finish', () => {
+            file.close()
+            try {
+              fs.chmodSync(binaryPath, '755')
+              console.log('yt-dlp binary downloaded and made executable')
+              resolve(true)
+            } catch (chmodError) {
+              console.error('Error making yt-dlp executable:', chmodError)
+              reject(chmodError)
+            }
+          })
+        }).on('error', (err: any) => {
+          console.error('Error downloading yt-dlp binary:', err)
+          if (existsSync(binaryPath)) {
+            fs.unlinkSync(binaryPath)
+          }
+          reject(err)
+        })
+      })
+    }
+    
+    // Execute yt-dlp binary directly
+    console.log('Executing yt-dlp binary...')
+    const command = `${binaryPath} --output "${outputTemplate}" --format "best[height<=720]/best" --no-playlist "${url}"`
+    console.log('Command:', command)
+    
+    const { stdout, stderr } = await execAsync(command)
+    
+    console.log('yt-dlp stdout:', stdout)
+    if (stderr) console.log('yt-dlp stderr:', stderr)
+    
+    return { stdout, stderr }
+    
+  } catch (error: any) {
+    console.error('Production download error:', error.message)
+    console.error('Full error:', error)
+    
+    // Try fallback with youtube-dl-exec if binary approach fails
+    try {
+      console.log('Trying fallback with youtube-dl-exec...')
+      const result = await youtubedl(url, {
+        output: outputTemplate,
+        format: 'best[height<=720]/best',
+        noPlaylist: true,
+        writeInfoJson: false,
+        writeThumbnail: false
+      })
+      console.log('Fallback successful')
+      return result
+    } catch (fallbackError: any) {
+      console.error('Fallback also failed:', fallbackError.message)
+      throw new Error(`Video download failed: ${error.message}. Fallback error: ${fallbackError.message}`)
+    }
+  }
 }
 
 // Local development download method
